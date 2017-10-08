@@ -15,6 +15,7 @@
  */
 package eu.davidea.flexibleadapter;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
@@ -96,6 +97,7 @@ import eu.davidea.viewholders.FlexibleViewHolder;
  *        <br/>
  *        20/02/2016 Sticky headers
  */
+@SuppressLint("NewApi")
 @SuppressWarnings({ "unchecked" })
 public abstract class FlexibleAdapter extends FlexibleAnimatorAdapter
         implements ItemTouchHelperCallback.AdapterCallback {
