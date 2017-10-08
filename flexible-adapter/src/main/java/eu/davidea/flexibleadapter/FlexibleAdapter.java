@@ -1473,7 +1473,6 @@ public abstract class FlexibleAdapter extends FlexibleAnimatorAdapter
         } else {
             super.notifyDataSetChanged();
         }
-//        mRecyclerView.scrollToPosition(flatPosition);
     }
 
     public void notifySectionItemRangeRemoved(int sectionIndex,
