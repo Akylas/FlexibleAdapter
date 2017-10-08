@@ -8,12 +8,13 @@ import android.os.Looper;
 import android.os.Message;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
-import android.support.v4.content.res.ResourcesCompat;
 import android.support.v4.view.MenuItemCompat;
 import android.support.v4.view.ViewCompat;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.view.ActionMode;
+import android.support.v7.widget.DefaultItemAnimator;
+import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.SearchView;
@@ -27,17 +28,27 @@ import android.widget.AdapterView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import eu.davidea.common.SimpleDividerItemDecoration;
-import eu.davidea.examples.anim.SlideInRightAnimator;
-import eu.davidea.examples.fastscroller.FastScroller;
+import eu.davidea.flexibleadapter.common.DividerItemDecoration;
+import eu.davidea.examples.models.AbstractExampleItem;
+import eu.davidea.examples.models.ExpandableItem;
+import eu.davidea.examples.models.HeaderItem;
+import eu.davidea.examples.models.SimpleItem;
+import eu.davidea.examples.models.SubItem;
+import eu.davidea.fastscroller.FastScroller;
 import eu.davidea.flexibleadapter.FlexibleAdapter;
+import eu.davidea.flexibleadapter.common.SmoothScrollLinearLayoutManager;
+import eu.davidea.flexibleadapter.items.AbstractFlexibleItem;
+import eu.davidea.flexibleadapter.items.IExpandable;
+import eu.davidea.flexibleadapter.items.IHeader;
+import eu.davidea.flexibleadapter.items.ISectionable;
+import eu.davidea.flipview.FlipView;
 import eu.davidea.utils.Utils;
 
 public class MainActivity extends AppCompatActivity implements
-		ActionMode.Callback, EditItemDialog.OnEditItemListener,
-		SearchView.OnQueryTextListener,
-		FlexibleAdapter.OnDeleteCompleteListener,
-		ExampleAdapter.OnItemClickListener {
+		ActionMode.Callback, EditItemDialog.OnEditItemListener, SearchView.OnQueryTextListener,
+		FlexibleAdapter.OnUpdateListener, FlexibleAdapter.OnDeleteCompleteListener,
+		FlexibleAdapter.OnItemClickListener, FlexibleAdapter.OnItemLongClickListener,
+		FlexibleAdapter.OnItemMoveListener, FlexibleAdapter.OnItemSwipeListener {
 
 	public static final String TAG = MainActivity.class.getSimpleName();
 
@@ -61,6 +72,7 @@ public class MainActivity extends AppCompatActivity implements
 	private ActionMode mActionMode;
 	private Snackbar mSnackBar;
 	private SwipeRefreshLayout mSwipeRefreshLayout;
+	private SearchView mSearchView;
 	private final Handler mSwipeHandler = new Handler(Looper.getMainLooper(), new Handler.Callback() {
 		public boolean handleMessage(Message message) {
 			switch (message.what) {
@@ -88,53 +100,76 @@ public class MainActivity extends AppCompatActivity implements
 		setContentView(R.layout.activity_main);
 		Log.d(TAG, "onCreate");
 
-		//Adapter & RecyclerView
-		mAdapter = new ExampleAdapter(this, "example parameter for List1");
-		mRecyclerView = (RecyclerView) findViewById(R.id.recycler_view);
-		mRecyclerView.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
-		mRecyclerView.setAdapter(mAdapter);
-		mRecyclerView.setHasFixedSize(true); //Size of views will not change as the data changes
-		mRecyclerView.setItemAnimator(new SlideInRightAnimator());
-		mRecyclerView.addItemDecoration(new SimpleDividerItemDecoration(
-				ResourcesCompat.getDrawable(getResources(), R.drawable.divider, null)));
+		//Settings for FlipView
+		FlipView.resetLayoutAnimationDelay(true, 1000L);
 
-		//Add FastScroll to the RecyclerView
-		FastScroller fastScroller = (FastScroller) findViewById(R.id.fast_scroller);
-		fastScroller.setRecyclerView(mRecyclerView);
-		fastScroller.setViewsToUse(R.layout.fast_scroller, R.id.fast_scroller_bubble, R.id.fast_scroller_handle);
+		//Adapter & RecyclerView
+		FlexibleAdapter.enableLogs(true);
+		mAdapter = new ExampleAdapter(this);
+		//Experimenting NEW features
+		mAdapter.setAnimationOnScrolling(true);
+		mAdapter.setAnimationOnReverseScrolling(true);
+		mAdapter.setAutoCollapseOnExpand(false);
+		mAdapter.setAutoScrollOnExpand(true);
+		mAdapter.setRemoveOrphanHeaders(false);
+		mRecyclerView = (RecyclerView) findViewById(R.id.recycler_view);
+		mRecyclerView.setLayoutManager(new SmoothScrollLinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
+		mRecyclerView.setAdapter(mAdapter);
+		mRecyclerView.setHasFixedSize(true); //Size of RV will not change
+		mRecyclerView.setItemAnimator(new DefaultItemAnimator() {
+			@Override
+			public boolean canReuseUpdatedViewHolder(RecyclerView.ViewHolder viewHolder) {
+				//NOTE: This allows to receive Payload objects on notifyItemChanged called by the Adapter!!!
+				return true;
+			}
+		});
+		//mRecyclerView.setItemAnimator(new SlideInRightAnimator());
+		mRecyclerView.addItemDecoration(new DividerItemDecoration(this, R.drawable.divider));
+
+		//Add FastScroll to the RecyclerView, after the Adapter has been attached the RecyclerView!!!
+		mAdapter.setFastScroller((FastScroller) findViewById(R.id.fast_scroller), Utils.getColorAccent(this));
+		//Experimenting NEW features
+		mAdapter.setLongPressDragEnabled(true);//Enable long press to drag items
+		mAdapter.setSwipeEnabled(true);//Enable swipe items
+		mAdapter.setDisplayHeadersAtStartUp(true);//Show Headers at startUp!
+		//Add sample item on the top (not part of library)
+		mAdapter.addUserLearnedSelection(savedInstanceState == null);
 
 		//FAB
 		mFab = (FloatingActionButton) findViewById(R.id.fab);
 		mFab.setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
-				destroyActionModeIfNeeded();
+				destroyActionModeIfCan();
 
-				for (int i = 0; i <= mAdapter.getItemCount(); i++) {
-					Item item = DatabaseService.newExampleItem(i);
-
-					if (!DatabaseService.getInstance().getListById(null).contains(item)) {
-						DatabaseService.getInstance().addItem(i, item);//This is the original list
-						//TODO: Use userLearnedSelection from settings
-						if (!DatabaseService.userLearnedSelection)
-							i++;//Fixing exampleAdapter for new position :-)
-						mAdapter.addItem(i, item);//Adapter's list is a copy, to animate the item you must call addItem on the new position
-						Log.d(TAG, "Added New " + item.getTitle());
-
+				for (int position = 0; position <= mAdapter.getItemCountOfTypes(R.layout.recycler_expandable_row) + 1; position++) {
+					//Every 3 positions I want to create an expandable
+					AbstractExampleItem item = (position % 3 == 0 ?
+							DatabaseService.newExpandableItem(position, null) :
+							DatabaseService.newSimpleItem(position, null));
+					//Add only if we don't have it
+					if (!DatabaseService.getInstance().getListById().contains(item)) {
+						DatabaseService.getInstance().addItem(position, item);//This is the original list
+						//For my example, the adapter position must be adjusted according to
+						//all child and headers currently visible
+						int adapterPos = position + mAdapter.getItemCountOfTypes(
+								R.layout.recycler_uls_row,
+								R.layout.recycler_expandable_row,
+								R.layout.recycler_child_row,
+								R.layout.recycler_header_row);
+						//Adapter's list is a copy, to animate the item you must call addItem on the new position
+						mAdapter.addItem(adapterPos, item);
 						Toast.makeText(MainActivity.this, "Added New " + item.getTitle(), Toast.LENGTH_SHORT).show();
-						mRecyclerView.smoothScrollToPosition(i);
-
-						//EmptyView
-						updateEmptyView();
-
+						mRecyclerView.smoothScrollToPosition(position);
 						break;
 					}
 				}
 			}
 		});
 
-		//Update EmptyView (by default EmptyView is visible)
-		updateEmptyView();
+		//With FlexibleAdapter v5.0.0 we don't need to call this function anymore
+		//It is automatically called if Activity implements FlexibleAdapter.OnUpdateListener
+		//updateEmptyView();
 
 		//SwipeToRefresh
 		initializeSwipeToRefresh();
@@ -151,6 +186,9 @@ public class MainActivity extends AppCompatActivity implements
 			if (savedInstanceState.containsKey(STATE_ACTIVATED_POSITION))
 				setSelection(savedInstanceState.getInt(STATE_ACTIVATED_POSITION));
 		}
+
+		//Settings for FlipView
+		FlipView.stopLayoutAnimation();
 	}
 
 	private void initializeSwipeToRefresh() {
@@ -164,10 +202,10 @@ public class MainActivity extends AppCompatActivity implements
 		mSwipeRefreshLayout.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
 			@Override
 			public void onRefresh() {
-				mAdapter.updateDataSet();
-//				mAdapter.updateDataSetAsync("example parameter for List1");
+				mAdapter.updateDataSet(DatabaseService.getInstance().getListById());
 				mSwipeRefreshLayout.setEnabled(false);
-				mSwipeHandler.sendEmptyMessageDelayed(0, 2000L);
+				mSwipeHandler.sendEmptyMessageDelayed(0, 1000L);
+				destroyActionModeIfCan();
 			}
 		});
 	}
@@ -198,22 +236,26 @@ public class MainActivity extends AppCompatActivity implements
 		//Associate searchable configuration with the SearchView
 		Log.d(TAG, "onCreateOptionsMenu setup SearchView!");
 		SearchManager searchManager = (SearchManager) getSystemService(Context.SEARCH_SERVICE);
-		final SearchView searchView = (SearchView) MenuItemCompat
+		mSearchView = (SearchView) MenuItemCompat
 				.getActionView(menu.findItem(R.id.action_search));
-		searchView.setInputType(InputType.TYPE_TEXT_VARIATION_FILTER);
-		searchView.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_FULLSCREEN);
-		searchView.setQueryHint(getString(R.string.action_search));
-		searchView.setSearchableInfo(searchManager.getSearchableInfo(getComponentName()));
-		searchView.setOnQueryTextListener(this);
-		searchView.setOnSearchClickListener(new View.OnClickListener() {
+		mSearchView.setInputType(InputType.TYPE_TEXT_VARIATION_FILTER);
+		mSearchView.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_FULLSCREEN);
+		mSearchView.setQueryHint(getString(R.string.action_search));
+		mSearchView.setSearchableInfo(searchManager.getSearchableInfo(getComponentName()));
+		mSearchView.setOnQueryTextListener(this);
+		mSearchView.setOnSearchClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
+				menu.findItem(R.id.action_list_type).setVisible(false);
+				menu.findItem(R.id.action_reverse).setVisible(false);
 				menu.findItem(R.id.action_about).setVisible(false);
 			}
 		});
-		searchView.setOnCloseListener(new SearchView.OnCloseListener() {
+		mSearchView.setOnCloseListener(new SearchView.OnCloseListener() {
 			@Override
 			public boolean onClose() {
+				menu.findItem(R.id.action_list_type).setVisible(true);
+				menu.findItem(R.id.action_reverse).setVisible(true);
 				menu.findItem(R.id.action_about).setVisible(true);
 				return false;
 			}
@@ -223,15 +265,25 @@ public class MainActivity extends AppCompatActivity implements
 	@Override
 	public boolean onPrepareOptionsMenu(Menu menu) {
 		Log.v(TAG, "onPrepareOptionsMenu called!");
-		SearchView searchView = (SearchView) menu.findItem(R.id.action_search).getActionView();
 		//Has searchText?
 		if (!mAdapter.hasSearchText()) {
 			Log.d(TAG, "onPrepareOptionsMenu Clearing SearchView!");
-			searchView.setIconified(true);// This also clears the text in SearchView widget
+			mSearchView.setIconified(true);// This also clears the text in SearchView widget
 		} else {
-			searchView.setQuery(mAdapter.getSearchText(), false);
-			searchView.setIconified(false);
+			mSearchView.setQuery(mAdapter.getSearchText(), false);
+			mSearchView.setIconified(false);
 		}
+
+		MenuItem headersMenuItem = menu.findItem(R.id.action_show_hide_headers);
+		headersMenuItem.setTitle(mAdapter.areHeadersShown() ? R.string.hide_headers : R.string.show_headers);
+		MenuItem headersSticky = menu.findItem(R.id.action_sticky_headers);
+		if (mAdapter.areHeadersShown()) {
+			headersSticky.setVisible(true);
+			headersSticky.setTitle(mAdapter.areHeadersSticky() ? R.string.scroll_headers : R.string.sticky_headers);
+		} else {
+			headersSticky.setVisible(false);
+		}
+
 		return super.onPrepareOptionsMenu(menu);
 	}
 
@@ -241,28 +293,25 @@ public class MainActivity extends AppCompatActivity implements
 				|| !mAdapter.getSearchText().equalsIgnoreCase(newText)) {
 			Log.d(TAG, "onQueryTextChange newText: " + newText);
 			mAdapter.setSearchText(newText);
-			//Filter the items and notify the change!
-			mAdapter.updateDataSet();
+			//Fill and Filter mItems with your custom list and automatically animate the changes
+			//Watch out! The original list must be a copy
+			mAdapter.filterItems(DatabaseService.getInstance().getListById(), 450L);
 		}
 
 		if (mAdapter.hasSearchText()) {
 			//mFab.setVisibility(View.GONE);
 			ViewCompat.animate(mFab)
-					.scaleX(0f)
-					.scaleY(0f)
-					.alpha(0f)
-					.setDuration(100)
+					.scaleX(0f).scaleY(0f)
+					.alpha(0f).setDuration(100)
 					.start();
 		} else {
+
 			//mFab.setVisibility(View.VISIBLE);
 			ViewCompat.animate(mFab)
-					.scaleX(1f)
-					.scaleY(1f)
-					.alpha(1f)
-					.setDuration(100)
+					.scaleX(1f).scaleY(1f)
+					.alpha(1f).setDuration(100)
 					.start();
 		}
-
 		return true;
 	}
 
@@ -275,7 +324,6 @@ public class MainActivity extends AppCompatActivity implements
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		int id = item.getItemId();
-		//noinspection SimplifiableIfStatement
 		if (id == R.id.action_about) {
 			MessageDialog.newInstance(
 					R.drawable.ic_info_grey600_24dp,
@@ -285,9 +333,195 @@ public class MainActivity extends AppCompatActivity implements
 							Utils.getVersionCode(this)))
 					.show(getFragmentManager(), MessageDialog.TAG);
 			return true;
+		} else if (id == R.id.action_list_type) {
+			if (mRecyclerView.getLayoutManager() instanceof GridLayoutManager) {
+				mRecyclerView.setLayoutManager(new SmoothScrollLinearLayoutManager(this));
+				item.setIcon(R.drawable.ic_view_grid_white_24dp);
+				item.setTitle(R.string.grid_layout);
+			} else {
+				GridLayoutManager gridLayoutManager = new GridLayoutManager(this, 2);
+				gridLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+					@Override
+					public int getSpanSize(int position) {
+						//NOTE: If you use simple integer to identify the ViewType,
+						//here, you should use them and not Layout integers
+						switch (mAdapter.getItemViewType(position)) {
+							case R.layout.recycler_uls_row:
+							case R.layout.recycler_header_row:
+							case R.layout.recycler_expandable_row:
+								return 2;
+							default:
+								return 1;
+						}
+					}
+				});
+				mRecyclerView.setLayoutManager(gridLayoutManager);
+				item.setIcon(R.drawable.ic_view_agenda_white_24dp);
+				item.setTitle(R.string.linear_layout);
+			}
+		} else if (id == R.id.action_reverse) {
+			if (mAdapter.isAnimationOnReverseScrolling()) {
+				mAdapter.setAnimationOnReverseScrolling(false);
+				item.setIcon(R.drawable.ic_sort_white_24dp);
+				item.setTitle(R.string.reverse_scrolling);
+			} else {
+				mAdapter.setAnimationOnReverseScrolling(true);
+				item.setIcon(R.drawable.ic_sort_descending_white_24dp);
+				item.setTitle(R.string.forward_scrolling);
+			}
+		} else if (id == R.id.action_auto_collapse) {
+			if (item.getTitle().equals(getString(R.string.auto_collapse))) {
+				mAdapter.setAutoCollapseOnExpand(true);
+				item.setTitle(R.string.keep_expanded);
+			} else {
+				mAdapter.setAutoCollapseOnExpand(false);
+				item.setTitle(R.string.auto_collapse);
+			}
+		} else if (id == R.id.action_expand_collapse_all) {
+			if (item.getTitle().equals(getString(R.string.expand_all))) {
+				mAdapter.expandAll();
+				item.setTitle(R.string.collapse_all);
+			} else {
+				mAdapter.collapseAll();
+				item.setTitle(R.string.expand_all);
+			}
+		} else if (id == R.id.action_show_hide_headers) {
+			if (mAdapter.areHeadersShown()) {
+				mAdapter.hideAllHeaders();
+				item.setTitle(R.string.show_headers);
+			} else {
+				mAdapter.showAllHeaders();
+				item.setTitle(R.string.hide_headers);
+			}
+		} else if (id == R.id.action_sticky_headers) {
+			if (mAdapter.areHeadersSticky()) {
+				mAdapter.disableStickyHeaders();
+				item.setTitle(R.string.sticky_headers);
+			} else {
+				mAdapter.enableStickyHeaders(3);
+				item.setTitle(R.string.scroll_headers);
+			}
 		}
 
+		//TODO: Show difference between MODE_IDLE, MODE_SINGLE
+		//TODO: Add toggle for mAdapter.toggleFastScroller();
+		//TODO: Add dialog configuration settings
+
 		return super.onOptionsItemSelected(item);
+	}
+
+	//TODO: Include setActivatedPosition in the library?
+	public void setSelection(final int position) {
+		if (mAdapter.getMode() == FlexibleAdapter.MODE_SINGLE) {
+			Log.v(TAG, "setSelection called!");
+			setActivatedPosition(position);
+			mRecyclerView.postDelayed(new Runnable() {
+				@Override
+				public void run() {
+					mRecyclerView.smoothScrollToPosition(position);
+				}
+			}, 1000L);
+		}
+	}
+
+	private void setActivatedPosition(int position) {
+		Log.d(TAG, "ItemList New mActivatedPosition=" + position);
+		mActivatedPosition = position;
+	}
+
+	@Override
+	public boolean onItemClick(int position) {
+		if (mActionMode != null && position != INVALID_POSITION) {
+			toggleSelection(position);
+			return true;
+		} else {
+			//Notify the active callbacks (ie. the activity, if the fragment is attached to one)
+			// that an item has been selected.
+			if (mAdapter.getItemCount() > 0) {
+				if (position != mActivatedPosition) setActivatedPosition(position);
+				AbstractFlexibleItem abstractItem = mAdapter.getItem(position);
+				assert abstractItem != null;
+				if (!(abstractItem instanceof ExpandableItem) && !(abstractItem instanceof IHeader)) {
+					//TODO FOR YOU: call your custom Action, for example mCallback.onItemSelected(item.getId());
+					String title = extractTitleFrom(abstractItem);
+					EditItemDialog.newInstance(title, position).show(getFragmentManager(), EditItemDialog.TAG);
+				}
+			}
+			return false;
+		}
+	}
+
+	@Override
+	public void onItemLongClick(int position) {
+		if (mActionMode == null) {
+			Log.d(TAG, "onItemLongClick actionMode activated!");
+			mActionMode = startSupportActionMode(this);
+		}
+		toggleSelection(position);
+	}
+
+//	@Override
+//	public boolean shouldMoveItem(int fromPosition, int toPosition) {
+//		return true;
+//	}
+
+	@Override
+	public void onItemMove(int fromPosition, int toPosition) {
+		AbstractFlexibleItem fromItem = mAdapter.getItem(fromPosition);
+		AbstractFlexibleItem toItem = mAdapter.getItem(toPosition);
+		//Don't swap if a Header is involved!!!
+		if (fromItem instanceof ISectionable || toItem instanceof ISectionable) {
+			return;
+		}
+		//FIXME: this doesn't work with all types of items (of course)..... we need to implement some custom logic
+//		DatabaseService.getInstance().swapItem(
+//				DatabaseService.getInstance().getListById().indexOf(fromItem),
+//				DatabaseService.getInstance().getListById().indexOf(toItem));
+	}
+
+	@Override
+	public void onItemSwipe(int position, int direction) {
+		AbstractFlexibleItem abstractItem = mAdapter.getItem(position);
+		assert abstractItem != null;
+		//Experimenting NEW feature
+		if (abstractItem.isSelectable())
+			mAdapter.setRestoreSelectionOnUndo(false);
+
+		//TODO: Create Undo Helper with SnackBar?
+		StringBuilder message = new StringBuilder();
+		message.append(extractTitleFrom(abstractItem))
+				.append(" ").append(getString(R.string.action_deleted));
+		//noinspection ResourceType
+		mSnackBar = Snackbar.make(findViewById(R.id.main_view), message, 7000)
+				.setAction(R.string.undo, new View.OnClickListener() {
+					@Override
+					public void onClick(View v) {
+						mAdapter.restoreDeletedItems();
+					}
+				});
+		mSnackBar.show();
+		mAdapter.removeItem(position, true);
+		logOrphanHeaders();
+		mAdapter.startUndoTimer(5000L + 200L, this);
+		//Handle ActionMode title
+		if (mAdapter.getSelectedItemCount() == 0)
+			destroyActionModeIfCan();
+		else
+			setContextTitle(mAdapter.getSelectedItemCount());
+	}
+
+	@Override
+	public void onTitleModified(int position, String newTitle) {
+		AbstractFlexibleItem abstractItem = mAdapter.getItem(position);
+		assert abstractItem != null;
+		if (abstractItem instanceof AbstractExampleItem) {
+			AbstractExampleItem exampleItem = (AbstractExampleItem) abstractItem;
+			exampleItem.setTitle(newTitle);
+		} else if (abstractItem instanceof HeaderItem) {
+			HeaderItem headerItem = (HeaderItem) abstractItem;
+			headerItem.setTitle(newTitle);
+		}
+		mAdapter.updateItem(position, abstractItem, null);
 	}
 
 	/**
@@ -296,11 +530,13 @@ public class MainActivity extends AppCompatActivity implements
 	 * <b>Note:</b> The order how the 3 Views (RecyclerView, EmptyView, FastScroller)
 	 * are placed in the Layout is important!
 	 */
-	private void updateEmptyView() {
+	@Override
+	public void onUpdateEmptyView(int size) {
+		Log.d(TAG, "onUpdateEmptyView size=" + size);
 		FastScroller fastScroller = (FastScroller) findViewById(R.id.fast_scroller);
 		TextView emptyView = (TextView) findViewById(R.id.empty);
 		emptyView.setText(getString(R.string.no_items));
-		if (!mAdapter.isEmpty()) {
+		if (size > 0) {
 			fastScroller.setVisibility(View.VISIBLE);
 			emptyView.setVisibility(View.GONE);
 		} else {
@@ -309,73 +545,18 @@ public class MainActivity extends AppCompatActivity implements
 		}
 	}
 
-	public void setSelection(final int position) {
-		Log.v(TAG, "setSelection called!");
-
-		setActivatedPosition(position);
-
-		mRecyclerView.postDelayed(new Runnable() {
-			@Override
-			public void run() {
-				mRecyclerView.smoothScrollToPosition(position);
-			}
-		}, 1000L);
-	}
-
-	private void setActivatedPosition(int position) {
-		Log.d(TAG, "ItemList New mActivatedPosition=" + position);
-		mActivatedPosition = position;
-	}
-
-
-	@Override
-	public void onTitleModified(int position, String newTitle) {
-		Item item = mAdapter.getItem(position);
-		item.setTitle(newTitle);
-		mAdapter.updateItem(position, item);
-	}
-
-	@Override
-	public boolean onListItemClick(int position) {
-		if (mActionMode != null && position != INVALID_POSITION) {
-			toggleSelection(position);
-			return true;
-		} else {
-			//Notify the active callbacks interface (the activity, if the
-			//fragment is attached to one) that an item has been selected.
-			if (mAdapter.getItemCount() > 0) {
-				if (position != mActivatedPosition) setActivatedPosition(position);
-				Item item = mAdapter.getItem(position);
-				//TODO: call your custom Callback, for example mCallback.onItemSelected(item.getId());
-				EditItemDialog.newInstance(item, position).show(getFragmentManager(), EditItemDialog.TAG);
-			}
-			return false;
-		}
-	}
-
-	@Override
-	public void onListItemLongClick(int position) {
-		Log.d(TAG, "onListItemLongClick on position " + position);
-		if (mActionMode == null) {
-			Log.d(TAG, "onListItemLongClick actionMode activated!");
-			mActionMode = startSupportActionMode(this);
-		}
-		Toast.makeText(this, "ImageClick or LongClick on " + mAdapter.getItem(position).getTitle(), Toast.LENGTH_SHORT).show();
-		toggleSelection(position);
-	}
-
 	/**
-	 * Toggle the selection state of an item.<br/><br/>
-	 * If the item was the last one in the selection and is unselected, the selection is stopped.
-	 * Note that the selection must already be started (actionMode must not be null).
+	 * Toggle the selection state of an item.
+	 * <p>If the item was the last one in the selection and is unselected, the selection is stopped.
+	 * Note that the selection must already be started (actionMode must not be null).</p>
 	 *
 	 * @param position Position of the item to toggle the selection state
 	 */
 	private void toggleSelection(int position) {
-		mAdapter.toggleSelection(position, false);
+		mAdapter.toggleSelection(position);
+		if (mActionMode == null) return;
 
 		int count = mAdapter.getSelectedItemCount();
-
 		if (count == 0) {
 			Log.d(TAG, "toggleSelection finish the actionMode");
 			mActionMode.finish();
@@ -387,17 +568,47 @@ public class MainActivity extends AppCompatActivity implements
 	}
 
 	private void setContextTitle(int count) {
-		mActionMode.setTitle(String.valueOf(count) + " " + (count == 1 ?
-				getString(R.string.action_selected_one) :
-				getString(R.string.action_selected_many)));
+		if (mActionMode != null) {
+			mActionMode.setTitle(String.valueOf(count) + " " + (count == 1 ?
+					getString(R.string.action_selected_one) :
+					getString(R.string.action_selected_many)));
+		}
 	}
 
 	@Override
 	public void onDeleteConfirmed() {
-		for (Item item : mAdapter.getDeletedItems()) {
-			//Remove items from your Database. Example:
-			Log.d(TAG, "Confirm removed " + item.getTitle());
-			DatabaseService.getInstance().removeItem(item);
+		mSwipeHandler.sendEmptyMessage(0);
+		for (AbstractFlexibleItem adapterItem : mAdapter.getDeletedItems()) {
+			//Removing items from Database. Example:
+			try {
+				//NEW! You can take advantage of AutoMap and differentiate logic by viewType using "switch" statement
+				switch (adapterItem.getLayoutRes()) {
+					case R.layout.recycler_child_row:
+						SubItem subItem = (SubItem) adapterItem;
+						ExpandableItem expandable = (ExpandableItem) mAdapter.getExpandableOfDeletedChild(subItem);
+						DatabaseService.getInstance().removeSubItem(expandable, subItem);
+						Log.d(TAG, "Confirm removed " + subItem.getTitle());
+						break;
+					case R.layout.recycler_expandable_row:
+						DatabaseService.getInstance().removeItem(adapterItem);
+						Log.d(TAG, "Confirm removed " + adapterItem);
+						break;
+				}
+
+			} catch (IllegalStateException e) {
+				//AutoMap is disabled, fallback to if-else with "instanceof" statement
+				if (adapterItem instanceof SubItem) {
+					//SubItem
+					SubItem subItem = (SubItem) adapterItem;
+					IExpandable expandable = mAdapter.getExpandableOf(subItem);
+					DatabaseService.getInstance().removeSubItem((ExpandableItem) expandable, subItem);
+					Log.d(TAG, "Confirm removed " + subItem.getTitle());
+				} else if (adapterItem instanceof SimpleItem) {
+					//SimpleItem or ExpandableItem(extends SimpleItem)
+					DatabaseService.getInstance().removeItem(adapterItem);
+					Log.d(TAG, "Confirm removed " + adapterItem);
+				}
+			}
 		}
 	}
 
@@ -410,7 +621,7 @@ public class MainActivity extends AppCompatActivity implements
 		mAdapter.setMode(ExampleAdapter.MODE_MULTI);
 		if (Utils.hasMarshmallow()) {
 			getWindow().setStatusBarColor(getResources().getColor(R.color.colorAccentDark_light, this.getTheme()));
-		} else {
+		} else if (Utils.hasLollipop()) {
 			//noinspection deprecation
 			getWindow().setStatusBarColor(getResources().getColor(R.color.colorAccentDark_light));
 		}
@@ -430,31 +641,45 @@ public class MainActivity extends AppCompatActivity implements
 				setContextTitle(mAdapter.getSelectedItemCount());
 				return true;
 			case R.id.action_delete:
-				//Build message before delete, for the Snackbar
+				//Build message before delete, for the SnackBar
 				StringBuilder message = new StringBuilder();
-				for (Integer pos : mAdapter.getSelectedItems()) {
-					message.append(mAdapter.getItem(pos).getTitle());
-					message.append(", ");
+				message.append(getString(R.string.action_deleted)).append(" ");
+				for (Integer pos : mAdapter.getSelectedPositions()) {
+					message.append(extractTitleFrom(mAdapter.getItem(pos)));
+					if (mAdapter.getSelectedItemCount() > 1)
+						message.append(", ");
 				}
-				message.append(" ").append(getString(R.string.action_deleted));
 
-				//Remove selected items from Adapter list after message is built
-				mAdapter.removeItems(mAdapter.getSelectedItems());
-
-				//Snackbar for Undo
+				//SnackBar for Undo
 				//noinspection ResourceType
-				mSnackBar = Snackbar.make(findViewById(R.id.main_view), message, 7000)
+				int undoTime = 20000;
+				//noinspection ResourceType
+				mSnackBar = Snackbar.make(findViewById(R.id.main_view), message, undoTime)
 						.setAction(R.string.undo, new View.OnClickListener() {
 							@Override
 							public void onClick(View v) {
 								mAdapter.restoreDeletedItems();
 								mSwipeHandler.sendEmptyMessage(0);
+								if (mAdapter.isRestoreWithSelection() && mAdapter.getSelectedItemCount() > 0) {
+									mActionMode = startSupportActionMode(MainActivity.this);
+									setContextTitle(mAdapter.getSelectedItemCount());
+								}
 							}
 						});
 				mSnackBar.show();
-				mAdapter.startUndoTimer(7000L + 200L, this);//+200: Using Snackbar, user can still click on the action button while bar is dismissing for a fraction of time
+
+				//Remove selected items from Adapter list after message is shown
+				//MY Payload is a Boolean(true), you can pass what ever you want!
+				mAdapter.removeItems(mAdapter.getSelectedPositions(), true);
+				logOrphanHeaders();
+				//+200: Using SnackBar, user can still click on the action button while bar is dismissing for a fraction of time
+				mAdapter.startUndoTimer(undoTime + 200L, this);
+
 				mSwipeHandler.sendEmptyMessage(1);
-				mSwipeHandler.sendEmptyMessageDelayed(0, 7000L);
+				mSwipeHandler.sendEmptyMessageDelayed(0, undoTime);
+
+				//Experimenting NEW feature
+				mAdapter.setRestoreSelectionOnUndo(true);
 				mActionMode.finish();
 				return true;
 			default:
@@ -465,12 +690,14 @@ public class MainActivity extends AppCompatActivity implements
 	@Override
 	public void onDestroyActionMode(ActionMode mode) {
 		Log.v(TAG, "onDestroyActionMode called!");
-		mAdapter.setMode(ExampleAdapter.MODE_SINGLE);
+		//With FlexibleAdapter v5.0.0 you should use MODE_IDLE if you don't want
+		//single selection still visible.
+		mAdapter.setMode(FlexibleAdapter.MODE_IDLE);
 		mAdapter.clearSelection();
 		mActionMode = null;
 		if (Utils.hasMarshmallow()) {
 			getWindow().setStatusBarColor(getResources().getColor(R.color.colorPrimaryDark_light, this.getTheme()));
-		} else {
+		} else if (Utils.hasLollipop()) {
 			//noinspection deprecation
 			getWindow().setStatusBarColor(getResources().getColor(R.color.colorPrimaryDark_light));
 		}
@@ -481,7 +708,7 @@ public class MainActivity extends AppCompatActivity implements
 	 *
 	 * @return true if ActionMode was active (in case it is also terminated), false otherwise
 	 */
-	public boolean destroyActionModeIfNeeded() {
+	public boolean destroyActionModeIfCan() {
 		if (mActionMode != null) {
 			mActionMode.finish();
 			return true;
@@ -492,11 +719,42 @@ public class MainActivity extends AppCompatActivity implements
 	@Override
 	public void onBackPressed() {
 		//If ActionMode is active, back key closes it
-		if (destroyActionModeIfNeeded()) return;
-
+		if (destroyActionModeIfCan()) return;
+		//If SearchView is visible, back key cancels search and iconify it
+		if (mSearchView != null && !mSearchView.isIconified()) {
+			mSearchView.setIconified(true);
+			return;
+		}
 		//Close the App
 		DatabaseService.onDestroy();
 		super.onBackPressed();
+	}
+
+	private void logOrphanHeaders() {
+		//If removeOrphanHeader is set false, once hidden the Orphan Headers are not shown
+		// anymore, but you can recover them using getOrphanHeaders()
+		for (IHeader header : mAdapter.getOrphanHeaders()) {
+			Log.w(TAG, "Logging orphan header " + header);
+		}
+	}
+
+	private String extractTitleFrom(AbstractFlexibleItem abstractItem) {
+		if (abstractItem instanceof AbstractExampleItem) {
+			AbstractExampleItem exampleItem = (AbstractExampleItem) abstractItem;
+			String title = exampleItem.getTitle();
+			if (exampleItem instanceof ExpandableItem) {
+				ExpandableItem expandableItem = (ExpandableItem) abstractItem;
+				if (expandableItem.getSubItems() != null) {
+					title += "(+" + expandableItem.getSubItems().size() + ")";
+				}
+			}
+			return title;
+		} else if (abstractItem instanceof HeaderItem) {
+			HeaderItem headerItem = (HeaderItem) abstractItem;
+			return headerItem.getTitle();
+		}
+		//We already covered all situations with instanceof
+		return "";
 	}
 
 }

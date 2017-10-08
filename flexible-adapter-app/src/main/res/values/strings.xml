@@ -5,7 +5,7 @@
 	<string name="action_select_all">Select All</string>
 	<string name="action_selected_one">selected</string>
 	<string name="action_selected_many">selected</string>
-	<string name="action_deleted">deleted</string>
+	<string name="action_deleted">Deleted</string>
 
 	<!-- User Learns Selection -->
 	<string name="uls_title"><![CDATA[<i>Click on Image (or LongClick on Item) to select that Item</i>]]></string>
@@ -30,7 +30,7 @@
 <a href="https://github.com/davideas">Github Profile</a>
 
 <br/><br/><b>Licence</b><br/>
-Copyright © 2015 Davide Steduto.
+Copyright © 2016 Davide Steduto.
 <br/><br/>Licensed under the Apache License, Version 2.0 (the "License");
 You may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -45,5 +45,18 @@ limitations under the License.
 ]]></string>
 	<string name="action_search">Search...</string>
 	<string name="undo">Undo</string>
+	<string name="linear_layout">Linear Layout</string>
+	<string name="grid_layout">Grid Layout</string>
+	<string name="reverse_scrolling">Reverse scrolling</string>
+	<string name="forward_scrolling">Forward scrolling</string>
+	<string name="auto_collapse">Auto collapse</string>
+	<string name="keep_expanded">Keep expanded</string>
+	<string name="expand_all">Expand All</string>
+	<string name="collapse_all">Collapse All</string>
+	<string name="show_headers">Show Headers</string>
+	<string name="hide_headers">Hide Headers</string>
+	<string name="sticky_headers">Sticky Headers</string>
+	<string name="scroll_headers">Scroll Headers</string>
+
 
 </resources>
